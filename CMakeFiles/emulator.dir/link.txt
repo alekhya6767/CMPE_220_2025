@@ -1,0 +1,1 @@
+/usr/bin/c++ CMakeFiles/emulator.dir/emulator/main.cpp.o -o emulator  libcpu.a 

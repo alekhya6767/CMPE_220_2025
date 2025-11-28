@@ -1,0 +1,5 @@
+/mnt/c/CMPE_220_2025/build/CMakeFiles/cpu.dir
+/mnt/c/CMPE_220_2025/build/CMakeFiles/emulator.dir
+/mnt/c/CMPE_220_2025/build/CMakeFiles/assembler.dir
+/mnt/c/CMPE_220_2025/build/CMakeFiles/edit_cache.dir
+/mnt/c/CMPE_220_2025/build/CMakeFiles/rebuild_cache.dir
