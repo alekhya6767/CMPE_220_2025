@@ -144,7 +144,6 @@ DecodedInstr ControlUnit::decode(uint8_t opcode, uint16_t op1, uint16_t op2) {
         d.type = InstrType::HALT;
         return d;
     }
-
-    // Unknown opcode
+    
     return d;
 }

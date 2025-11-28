@@ -1,7 +1,3 @@
-// =========================================================
-// assembler.cpp — FINAL FIXED VERSION
-// =========================================================
-
 #include <iostream>
 #include <fstream>
 #include <sstream>
