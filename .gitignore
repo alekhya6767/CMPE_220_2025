@@ -1,1 +1,15 @@
+# Build directory
 build/
+
+# CMake generated files (if ever created outside build)
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+Makefile
+
+# Binaries / artifacts
+emulator
+assembler
+*.o
+*.a
+*.bin
