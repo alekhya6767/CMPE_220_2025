@@ -1,54 +1,85 @@
-; ========================================
-; Recursive factorial using CALL/RET
-; n = 5
-; R0 on exit = 5! = 120
-; ========================================
+; ============================================================
+; RECURSIVE FACTORIAL ON SOFTWARE CPU
+; ------------------------------------------------------------
+; Computes n! for n <= 7 using:
+;   - CALL / RET
+;   - PUSH / POP (stack for saving n and return addresses)
+;   - Simple multiply loop using repeated addition
+;
+; Register conventions in this program:
+;   R0 : input n, and final result factorial(n)
+;   R1 : temporary / copy of n or partial results
+;   R2 : temporary (loop counter)
+;   R3 : constant 1 (used for decrement/increment)
+;   R4 : saved 'n' value on each recursion (after POP)
+;   R5 : spare (not strictly required here)
+;
+; Stack:
+;   - CALL pushes return PC, RET pops it.
+;   - PUSH R0 saves the current n before the recursive call.
+; ============================================================
 
-        MOVI R0, 5          ; R0 = n
-        CALL fact           ; R0 = fact(5)
-        STORE R0, 0xFF00    ; print 120
-        HALT
+        ; Choose input n
+        MOVI R0, 5          ; R0 = 5  (change this value to test other n)
 
-; ========================================
-; fact(n):
-; if (n == 0) return 1
-; else        return n * fact(n - 1)
-; ========================================
+        ; Call recursive function fact(R0)
+        CALL fact           ; result will be returned in R0
+
+        ; Print result via memory-mapped I/O at 0xFF00
+        STORE R0, 0xFF00    ; prints factorial(n) as a decimal number
+
+        HALT                ; stop emulator
+
+
+; ============================================================
+; FUNCTION: fact
+; ------------------------------------------------------------
+; Contract:
+;   Input : R0 = n
+;   Output: R0 = n!
+;
+; Logic:
+;   if (n == 0) return 1
+;   else        return n * fact(n - 1)
+; ============================================================
 
 fact:
-        ; ---- base case: if R0 == 0 → return 1 ----
+        ; ----- Base case: if n == 0 → return 1 -----
         MOVI R1, 0          ; R1 = 0
-        CMP  R0, R1         ; compare n with 0
-        JZ   base_case      ; if n == 0 → base_case
+        CMP  R0, R1         ; compare n (R0) with 0
+        JZ   fact_base      ; if n == 0, jump to base_case
 
-        ; ---- recursive case ----
-        ; Save n on stack
-        PUSH R0             ; [SP] = n, SP -= 2
+        ; ----- Recursive case: n * fact(n - 1) -----
 
-        ; Call fact(n - 1)
-        MOVI R2, 1          ; R2 = 1
-        SUB  R0, R2         ; R0 = n - 1
-        CALL fact           ; after return: R0 = fact(n - 1)
+        ; Save current n on the stack
+        PUSH R0             ; push n
 
-        ; Restore n from stack
-        POP  R4             ; R4 = original n, SP += 2
+        ; Compute n - 1 and call fact(n - 1)
+        MOVI R3, 1          ; R3 = 1  (constant for decrement/increment)
+        SUB  R0, R3         ; R0 = n - 1
+        CALL fact           ; recursive call, returns fact(n - 1) in R0
 
-        ; ---- multiply: R0 = fact(n-1) * n ----
-        MOV  R5, R0         ; R5 = fact(n - 1)
+        ; Restore original n from stack
+        POP  R4             ; R4 = original n
+
+        ; ----- Multiply: R0 = fact(n-1) * n -----
+        MOV  R1, R0         ; R1 = fact(n - 1)
         MOVI R0, 0          ; R0 = accumulator = 0
-        MOVI R3, 0          ; R3 = counter = 0
-        MOVI R2, 1          ; R2 = 1 (step)
+        MOVI R2, 0          ; R2 = loop counter = 0
 
-mul_loop:
-        CMP  R3, R4         ; while (counter < n)
-        JZ   mul_done       ; if counter == n → done
-        ADD  R0, R5         ; acc += fact(n - 1)
-        ADD  R3, R2         ; counter++
-        JMP  mul_loop
+fact_mul_loop:
+        ; loop while R2 < R4
+        CMP  R2, R4         ; compare counter with n
+        JZ   fact_mul_done  ; if R2 == n, multiplication done
 
-mul_done:
-        RET                 ; return to caller, R0 has n!
+        ADD  R0, R1         ; R0 += fact(n - 1)
+        ADD  R2, R3         ; R2 += 1
+        JMP  fact_mul_loop  ; repeat
 
-base_case:
-        MOVI R0, 1          ; fact(0) = 1
-        RET
+fact_mul_done:
+        RET                 ; return to caller, R0 holds n!
+
+; ----- Base case implementation -----
+fact_base:
+        MOVI R0, 1          ; 0! = 1
+        RET                 ; return to caller
