@@ -1,148 +1,248 @@
-#include <iostream>
+#include "assembler.h"
 #include <fstream>
+#include <iostream>
 #include <sstream>
-#include <vector>
-#include <unordered_map>
-#include <cstdint>
+#include <algorithm>
+#include <cctype>
 
-// Correct tokenizer: DOES NOT break hex values
-std::vector<std::string> tokenize(const std::string &line) {
-    std::vector<std::string> tokens;
-    std::string temp;
+// ------------------------------------------------------------
+// Trim helper
+// ------------------------------------------------------------
+static std::string trim(const std::string &s) {
+    size_t start = s.find_first_not_of(" \t\r\n");
+    if (start == std::string::npos) return "";
+    size_t end = s.find_last_not_of(" \t\r\n");
+    return s.substr(start, end - start + 1);
+}
 
-    std::istringstream iss(line);
+// ------------------------------------------------------------
+// Remove comments
+// ------------------------------------------------------------
+static std::string remove_comment(const std::string &line) {
+    size_t p = line.find(';');
+    if (p == std::string::npos) return line;
+    return line.substr(0, p);
+}
 
-    while (iss >> temp) {
-        if (!temp.empty() && temp.back() == ',')
-            temp.pop_back();
-        tokens.push_back(temp);
+// ------------------------------------------------------------
+// SPLIT instruction safely ("MOV R1, R2")
+// ------------------------------------------------------------
+static std::vector<std::string> tokenize(const std::string &line) {
+    std::vector<std::string> out;
+    std::stringstream ss(line);
+    std::string word;
+    while (ss >> word) {
+        if (!word.empty() && word.back() == ',')
+            word.pop_back();
+        out.push_back(word);
     }
-
-    return tokens;
+    return out;
 }
 
-uint16_t parse_value(const std::string &s) {
-    if (s.rfind("0x", 0) == 0 || s.rfind("0X", 0) == 0)
-        return (uint16_t)std::stoi(s, nullptr, 16);
-    return (uint16_t)std::stoi(s);
-}
-
-int parse_register(const std::string &r) {
-    return r[1] - '0';
-}
-
-std::unordered_map<std::string, uint8_t> OPCODES = {
-    {"MOVI", 0x10},
-    {"MOV",  0x11},
-    {"ADD",  0x20},
-    {"SUB",  0x21},
-    {"AND",  0x22},
-    {"OR",   0x23},
-    {"XOR",  0x24},
-    {"CMP",  0x25},
-    {"LOAD", 0x30},
-    {"STORE",0x31},
-    {"JMP",  0x40},
-    {"JZ",   0x41},
-    {"JNZ",  0x42},
-    {"HALT", 0xFF}
-};
-
-void pass1(const std::string &file,
-           std::vector<std::vector<std::string>>& lines,
-           std::unordered_map<std::string, uint16_t>& labels)
+// ============================================================
+// PASS 1: Collect label addresses
+// ============================================================
+bool Assembler::assemble(const std::string &inputFile, const std::string &outputFile)
 {
-    std::ifstream f(file);
-    if (!f.is_open()) {
-        std::cerr << "Cannot open " << file << "\n";
-        exit(1);
+    std::ifstream fin(inputFile);
+    if (!fin.is_open()) {
+        std::cerr << "Error: Cannot open ASM file.\n";
+        return false;
     }
 
-    uint16_t pc = 0;
+    std::vector<std::string> lines;
     std::string line;
 
-    while (std::getline(f, line)) {
-        if (line.empty() || line[0] == ';') continue;
+    while (std::getline(fin, line))
+        lines.push_back(line);
+    fin.close();
 
+    if (!first_pass(lines)) return false;
+
+    std::vector<uint8_t> output;
+    if (!second_pass(lines, output)) return false;
+
+    std::ofstream fout(outputFile, std::ios::binary);
+    fout.write((char*)output.data(), output.size());
+    fout.close();
+
+    std::cout << "Assembly successful! Output written to: " << outputFile << "\n";
+    return true;
+}
+
+bool Assembler::first_pass(const std::vector<std::string> &lines)
+{
+    labels.clear();
+    uint16_t pc = 0;
+
+    for (auto &raw : lines) {
+        std::string line = trim(remove_comment(raw));
+        if (line.empty()) continue;
+
+        // Label
         if (line.back() == ':') {
-            std::string label = line.substr(0, line.size() - 1);
+            std::string label = trim(line.substr(0, line.size() - 1));
             labels[label] = pc;
             continue;
         }
 
-        auto toks = tokenize(line);
-        if (!toks.empty()) {
-            lines.push_back(toks);
-            pc += 5;
-        }
+        // Real instruction → always 5 bytes
+        pc += 5;
     }
+    return true;
 }
 
-std::vector<uint8_t> pass2(
-    const std::vector<std::vector<std::string>>& lines,
-    const std::unordered_map<std::string, uint16_t>& labels)
+// ------------------------------------------------------------
+// Convert tokens to opcode
+// ------------------------------------------------------------
+static uint8_t get_opcode(const std::string &m) {
+    if (m == "MOVI") return 0x10;
+    if (m == "MOV")  return 0x11;
+
+    if (m == "ADD")  return 0x20;
+    if (m == "SUB")  return 0x21;
+    if (m == "AND")  return 0x22;
+    if (m == "OR")   return 0x23;
+    if (m == "XOR")  return 0x24;
+    if (m == "CMP")  return 0x25;
+
+    if (m == "LOAD")  return 0x30;
+    if (m == "STORE") return 0x31;
+
+    if (m == "JMP") return 0x40;
+    if (m == "JZ")  return 0x41;
+    if (m == "JNZ") return 0x42;
+
+    if (m == "PUSH") return 0x50;
+    if (m == "POP")  return 0x51;
+
+    if (m == "CALL") return 0x60;
+    if (m == "RET")  return 0x61;
+
+    if (m == "HALT") return 0xFF;
+
+    return 0; // error handled later
+}
+
+// ------------------------------------------------------------
+// Convert register token "R4"
+// ------------------------------------------------------------
+int Assembler::get_register_index(const std::string &reg) {
+    if (reg.size() < 2 || reg[0] != 'R')
+        throw std::runtime_error("Invalid register: " + reg);
+    return std::stoi(reg.substr(1));
+}
+
+// ------------------------------------------------------------
+// Parse immediate or label
+// ------------------------------------------------------------
+uint16_t Assembler::parse_number(const std::string &s)
 {
-    std::vector<uint8_t> out;
+    if (s.empty()) return 0;
 
-    for (auto &t : lines) {
-        std::string op = t[0];
-        uint8_t code = OPCODES[op];
+    if (labels.count(s))
+        return labels[s];
 
-        uint16_t op1 = 0;
-        uint16_t op2 = 0;
+    if (s.rfind("0x", 0) == 0)
+        return std::stoi(s, nullptr, 16);
 
-        if (op == "MOVI") {
-            op1 = parse_register(t[1]);
-            op2 = parse_value(t[2]);
-        }
-        else if (op == "MOV") {
-            op1 = parse_register(t[1]);
-            op2 = parse_register(t[2]);
-        }
-        else if (op == "STORE" || op == "LOAD") {
-            op1 = parse_register(t[1]);
-            std::string addr = t[2];
-            op2 = labels.count(addr) ? labels.at(addr) : parse_value(addr);
-        }
-        else if (op == "ADD" || op == "SUB" || op=="AND" || op=="OR" || op=="XOR" || op=="CMP") {
-            op1 = parse_register(t[1]);
-            op2 = parse_register(t[2]);
-        }
-        else if (op == "JMP" || op == "JZ" || op == "JNZ") {
-            std::string tgt = t[1];
-            op1 = labels.count(tgt) ? labels.at(tgt) : parse_value(tgt);
-        }
-
-        out.push_back(code);
-        out.push_back(op1 & 0xFF);
-        out.push_back((op1 >> 8) & 0xFF);
-        out.push_back(op2 & 0xFF);
-        out.push_back((op2 >> 8) & 0xFF);
-    }
-
-    return out;
+    return std::stoi(s);
 }
 
-int main(int argc, char** argv) {
+// ============================================================
+// PASS 2: Encode instructions
+// ============================================================
+bool Assembler::second_pass(const std::vector<std::string> &lines,
+                            std::vector<uint8_t> &out)
+{
+    out.clear();
 
-    if (argc < 3) {
-        std::cout << "Usage: ./assembler input.asm output.bin\n";
-        return 1;
+    for (auto &raw : lines) {
+
+        std::string clean = trim(remove_comment(raw));
+        if (clean.empty()) continue;
+
+        if (clean.back() == ':') continue;  // skip label
+
+        auto tokens = tokenize(clean);
+        if (tokens.empty()) continue;
+
+        std::string mnemonic = tokens[0];
+        uint8_t opcode = get_opcode(mnemonic);
+
+        if (opcode == 0) {
+            std::cerr << "Unknown instruction: " << mnemonic << "\n";
+            return false;
+        }
+
+        uint16_t op1 = 0, op2 = 0;
+
+        // ---------------------------- SPECIAL CASES ----------------------------
+
+        if (opcode == 0x61) { // RET
+            encode_instruction(opcode, 0, 0, out);
+            continue;
+        }
+
+        if (opcode == 0x50) { // PUSH Rn
+            if (tokens.size() != 2) throw std::runtime_error("PUSH requires 1 operand");
+            op1 = get_register_index(tokens[1]);
+            op2 = 0;
+            encode_instruction(opcode, op1, op2, out);
+            continue;
+        }
+
+        if (opcode == 0x51) { // POP Rn
+            if (tokens.size() != 2) throw std::runtime_error("POP requires 1 operand");
+            op1 = get_register_index(tokens[1]);
+            op2 = 0;
+            encode_instruction(opcode, op1, op2, out);
+            continue;
+        }
+
+        if (opcode == 0x60) { // CALL label
+            if (tokens.size() != 2) throw std::runtime_error("CALL requires 1 operand");
+            op1 = parse_number(tokens[1]);
+            op2 = 0;
+            encode_instruction(opcode, op1, op2, out);
+            continue;
+        }
+
+        // ---------------------- GENERAL 2-OPERAND INSTRUCTIONS ----------------------
+
+        if (tokens.size() == 2) {
+            // Rn, imm OR Rn, Rm
+            op1 = (tokens[1][0] == 'R') ?
+                get_register_index(tokens[1]) :
+                parse_number(tokens[1]);
+        }
+        else if (tokens.size() == 3) {
+            op1 = (tokens[1][0] == 'R') ?
+                get_register_index(tokens[1]) :
+                parse_number(tokens[1]);
+
+            op2 = (tokens[2][0] == 'R') ?
+                get_register_index(tokens[2]) :
+                parse_number(tokens[2]);
+        }
+
+        encode_instruction(opcode, op1, op2, out);
     }
 
-    std::string in = argv[1];
-    std::string outp = argv[2];
+    return true;
+}
 
-    std::vector<std::vector<std::string>> lines;
-    std::unordered_map<std::string, uint16_t> labels;
-
-    pass1(in, lines, labels);
-    auto data = pass2(lines, labels);
-
-    std::ofstream out(outp, std::ios::binary);
-    out.write((char*)data.data(), data.size());
-    out.close();
-
-    std::cout << "Assembly successful! Output written to: " << outp << "\n";
-    return 0;
+// ============================================================
+// Encode instruction (5 bytes)
+// ============================================================
+void Assembler::encode_instruction(uint8_t opcode,
+                                   uint16_t op1,
+                                   uint16_t op2,
+                                   std::vector<uint8_t> &out)
+{
+    out.push_back(opcode);
+    out.push_back(op1 & 0xFF);
+    out.push_back((op1 >> 8) & 0xFF);
+    out.push_back(op2 & 0xFF);
+    out.push_back((op2 >> 8) & 0xFF);
 }

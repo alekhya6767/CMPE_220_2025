@@ -1,103 +1,98 @@
-#include "memory.h"          // Include the memory class definition
-#include <iomanip>           // For formatted hex output during memory dump
+#include "memory.h"
+#include <iomanip>
 
-// ===============================================================
-// Constructor: Initialize memory to all zeros
-// Also initialize the I/O-mapped registers (OUTPUT & TIMER)
-// ===============================================================
-Memory::Memory() : mem(MEM_SIZE, 0) {   // Create RAM array of MEM_SIZE bytes
-    mem[IO_OUTPUT] = 0;                 // Output port initialized
-    mem[IO_TIMER]  = 0;                 // Timer port initialized
+// ---------------------------------------------
+// Constructor – initialize memory + I/O
+// ---------------------------------------------
+Memory::Memory() : mem(MEM_SIZE, 0) {
+    mem[IO_OUTPUT_NUM]  = 0;
+    mem[IO_TIMER]       = 0;
+    mem[IO_OUTPUT_CHAR] = 0;
 }
 
-// ===============================================================
-// Read a single byte from memory
-// addr → 16-bit memory address
-// returns uint8_t at that location
-// ===============================================================
+// ---------------------------------------------
+// Read 8-bit value
+// ---------------------------------------------
 uint8_t Memory::read8(uint16_t addr) const {
-    return mem[addr];                    // Return 1 byte stored at addr
+    return mem[addr];
 }
 
-// ===============================================================
-// Read a 16-bit word: little-endian format
-// low byte at addr, high byte at addr+1
-// ===============================================================
+// ---------------------------------------------
+// Read 16-bit little-endian value
+// ---------------------------------------------
 uint16_t Memory::read16(uint16_t addr) const {
-    uint16_t lo = mem[addr];             // Low byte
-    uint16_t hi = mem[addr + 1];         // High byte
-    return (hi << 8) | lo;               // Combine to form 16-bit value
+    uint16_t lo = mem[addr];
+    uint16_t hi = mem[addr + 1];
+    return (hi << 8) | lo;
 }
 
-// ===============================================================
-// Write a single byte to memory
-// Includes special handling for I/O mapped addresses:
-//   - Writing to OUTPUT prints to console
-//   - Writing to TIMER updates internal timer
-// ===============================================================
+// ---------------------------------------------
+// Write 8-bit value
+// ---------------------------------------------
 void Memory::write8(uint16_t addr, uint8_t value) {
 
-    // ---------------------------
-    // OUTPUT PORT (0xFF00)
-    // Prints integer value to console
-    // ---------------------------
-    if (addr == IO_OUTPUT) {
-        std::cout << std::dec << (int)value << " " << std::flush;  
-        mem[addr] = value;               // Store printed value in memory
-        return;                          // Stop further handling
-    }
-
-    // ---------------------------
-    // TIMER PORT (0xFF01)
-    // Simply stores timer value
-    // ---------------------------
+    // Timer register
     if (addr == IO_TIMER) {
-        mem[addr] = value;               // Update timer
+        mem[addr] = value;
         return;
     }
 
-    // ---------------------------
-    // Regular Memory Write
-    // ---------------------------
-    mem[addr] = value;                   // Store byte normally
+    // Character output (low byte as ASCII)
+    if (addr == IO_OUTPUT_CHAR) {
+        char c = static_cast<char>(value);
+        std::cout << c << std::flush;
+        mem[addr] = value;
+        return;
+    }
+
+    // Default write
+    mem[addr] = value;
 }
 
-// ===============================================================
-// Write a 16-bit word using two 8-bit writes
-// Uses little-endian encoding
-// ===============================================================
+// ---------------------------------------------
+// Write 16-bit little-endian value
+// ---------------------------------------------
 void Memory::write16(uint16_t addr, uint16_t value) {
-    write8(addr, value & 0xFF);          // Write low byte first
-    write8(addr + 1, (value >> 8) & 0xFF);  // Then high byte
+
+    // Numeric output port – print decimal number
+    if (addr == IO_OUTPUT_NUM) {
+        std::cout << std::dec << value << " " << std::flush;
+        mem[addr]     = value & 0xFF;
+        mem[addr + 1] = (value >> 8) & 0xFF;
+        return;
+    }
+
+    // Character output port – use low byte as char
+    if (addr == IO_OUTPUT_CHAR) {
+        char c = static_cast<char>(value & 0xFF);
+        std::cout << c << std::flush;
+        mem[addr]     = value & 0xFF;
+        mem[addr + 1] = (value >> 8) & 0xFF;
+        return;
+    }
+
+    // Normal RAM write
+    write8(addr,     value & 0xFF);
+    write8(addr + 1, (value >> 8) & 0xFF);
 }
 
-// ===============================================================
-// tick_timer()
-// Automatically increments the TIMER register each CPU cycle
-// Used to simulate hardware timer behavior
-// ===============================================================
+// ---------------------------------------------
+// Tick timer – increment timer register
+// ---------------------------------------------
 void Memory::tick_timer() {
-    mem[IO_TIMER]++;                     // Increment timer register
+    mem[IO_TIMER]++;     // simple free-running 8-bit timer
 }
 
-// ===============================================================
-// dump(start, end)
-// Prints memory from start → end (inclusive)
-// Used for debugging and CPU HALT dump
-// ===============================================================
+// ---------------------------------------------
+// Dump memory [start, end]
+// ---------------------------------------------
 void Memory::dump(uint16_t start, uint16_t end) const {
     std::cout << "\n--- Memory Dump ---\n";
-
     for (uint16_t addr = start; addr <= end; addr++) {
         std::cout << "0x"
-                  << std::hex                         // Switch to hex output
-                  << std::setw(4)                     // 4 hex digits for address
-                  << std::setfill('0')                // Pad with zeros
-                  << addr
+                  << std::hex << std::setw(4) << std::setfill('0') << addr
                   << ": 0x"
-                  << std::setw(2)                     // 2 hex digits for data
-                  << (int)mem[addr]
-                  << std::dec                         // Reset formatting to decimal
-                  << "\n";
+                  << std::setw(2) << (int)mem[addr]
+                  << std::dec << "\n";
     }
 }

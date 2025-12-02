@@ -2,31 +2,32 @@
 #include <iostream>
 #include <iomanip>
 
-// ======================================================
-// CPU Constructor
-// ======================================================
+// =======================================
+// Constructor
+// =======================================
+
 CPU::CPU() {
-    // RegisterFile + Memory constructors already initialize everything.
+    regs.PC = 0;
+    regs.SP = 0x8000;      // <--- THIS FIXES THE FACTORIAL BUG
+    for (int i = 0; i < 8; i++) regs.R[i] = 0;
+    regs.flags = {0,0};
 }
 
-// ======================================================
-// load_program()
-// Load binary program into memory starting at 'start'.
-// ======================================================
-void CPU::load_program(const std::vector<uint8_t>& program, uint16_t start) {
 
-    for (size_t i = 0; i < program.size(); i++) {
+// =======================================
+// Load program into memory and set PC
+// =======================================
+void CPU::load_program(const std::vector<uint8_t> &program, uint16_t start)
+{
+    for (size_t i = 0; i < program.size(); i++)
         memory.write8(start + i, program[i]);
-    }
 
-    // Execution starts at 'start'
     regs.PC = start;
 }
 
-// ======================================================
-// run()
-// Main loop: step() until HALT instruction triggers exit()
-// ======================================================
+// =======================================
+// Main execution loop
+// =======================================
 void CPU::run() {
     while (true) {
         step();
@@ -34,164 +35,157 @@ void CPU::run() {
     }
 }
 
-// ======================================================
-// step()
+// =======================================
+// Execute a single instruction
 // Fetch → Decode → Execute → Update PC
-// ======================================================
-void CPU::step() {
-
-    // ----------------------------
-    // FETCH OPCODE
-    // ----------------------------
+// =======================================
+void CPU::step()
+{
+    // -------- FETCH OPCODE --------
     uint16_t pc = regs.PC;
     uint8_t opcode = memory.read8(pc);
-
-    // PC moves to operands
     regs.PC++;
 
-    // ----------------------------
-    // FETCH OPERANDS (always 2 words)
-    // ----------------------------
+    // -------- FETCH OPERANDS --------
     uint16_t op1 = memory.read16(regs.PC);
     regs.PC += 2;
 
     uint16_t op2 = memory.read16(regs.PC);
     regs.PC += 2;
 
-    // ----------------------------
-    // DECODE
-    // ----------------------------
+    // -------- DECODE --------
     DecodedInstr instr = cu.decode(opcode, op1, op2);
 
-    // ----------------------------
-    // EXECUTE
-    // ----------------------------
-    switch (instr.type) {
-
-        // =====================================================
-        // MOVI Rd, #imm
-        // =====================================================
-        case InstrType::REG_IMM: {
-            uint16_t result = alu.mov(instr.imm);
-            regs.R[instr.rd] = result;
-            regs.flags.ZF = (result == 0);
+    // -------- EXECUTE --------
+    switch (instr.type)
+    {
+        // =============================
+        // MOV Rn, imm
+        // =============================
+        case InstrType::REG_IMM:
+            regs.R[instr.rd] = instr.imm;
+            regs.flags.ZF = (instr.imm == 0);
             break;
-        }
 
-        // =====================================================
-        // MOV Rd, Rs
-        // =====================================================
-        case InstrType::REG_REG: {
-            uint16_t result = alu.mov(regs.R[instr.rs]);
-            regs.R[instr.rd] = result;
-            regs.flags.ZF = (result == 0);
-            break;
-        }
-
-        // =====================================================
-        // ALU OPERATIONS: ADD, SUB, AND, OR, XOR, CMP
-        // =====================================================
-        case InstrType::ALU_REG_REG: {
-            uint16_t a = regs.R[instr.rd];
-            uint16_t b = regs.R[instr.rs];
-            uint16_t result = 0;
-
-            switch (instr.alu_op) {
-
-                case ALUOp::ADD:
-                    result = alu.add(a, b, regs.flags);
-                    regs.R[instr.rd] = result;
-                    break;
-
-                case ALUOp::SUB:
-                    result = alu.sub(a, b, regs.flags);
-                    regs.R[instr.rd] = result;
-                    break;
-
-                case ALUOp::AND_:
-                    result = alu._and(a, b, regs.flags);
-                    regs.R[instr.rd] = result;
-                    break;
-
-                case ALUOp::OR_:
-                    result = alu._or(a, b, regs.flags);
-                    regs.R[instr.rd] = result;
-                    break;
-
-                case ALUOp::XOR_:
-                    result = alu._xor(a, b, regs.flags);
-                    regs.R[instr.rd] = result;
-                    break;
-
-                case ALUOp::CMP:
-                    alu.cmp(a, b, regs.flags);
-                    break;
-
-                default:
-                    break;
-            }
-            break;
-        }
-
-        // =====================================================
-        // LOAD Rd, [addr]
-        // =====================================================
-        case InstrType::LOAD_WORD: {
-            uint16_t addr = instr.imm;
-            uint16_t val = memory.read16(addr);
+        // =============================
+        // MOV Rn, Rm
+        // =============================
+        case InstrType::REG_REG:
+        {
+            uint16_t val = regs.R[instr.rs];
             regs.R[instr.rd] = val;
             regs.flags.ZF = (val == 0);
             break;
         }
 
-        // =====================================================
-        // STORE Rs, [addr]
-        // FIXED: Write only LOW 8 bits, NOT 16-bit
-        // =====================================================
-        case InstrType::STORE_WORD: {
-            uint16_t addr = instr.imm;
-            uint16_t val  = regs.R[instr.rs];
+        // =============================
+        // ALU ops: ADD, SUB, CMP, etc.
+        // =============================
+        case InstrType::ALU_REG_REG:
+        {
+            uint16_t a = regs.R[instr.rd];
+            uint16_t b = regs.R[instr.rs];
+            uint16_t result = 0;
 
-            // IMPORTANT FIX:
-            // DO NOT WRITE16 — this corrupts the next instruction.
-            memory.write8(addr, val & 0xFF);
+            switch (instr.alu_op)
+            {
+                case ALUOp::ADD: result = alu.add(a, b, regs.flags); break;
+                case ALUOp::SUB: result = alu.sub(a, b, regs.flags); break;
+                case ALUOp::AND_: result = alu._and(a, b, regs.flags); break;
+                case ALUOp::OR_:  result = alu._or(a, b, regs.flags); break;
+                case ALUOp::XOR_: result = alu._xor(a, b, regs.flags); break;
+                case ALUOp::CMP:
+                    alu.cmp(a, b, regs.flags);
+                    break;
+                default: break;
+            }
+
+            if (instr.alu_op != ALUOp::CMP)
+                regs.R[instr.rd] = result;
 
             break;
         }
 
-        // =====================================================
-        // JMP addr
-        // =====================================================
-        case InstrType::JUMP: {
+        // =============================
+        // LOAD / STORE
+        // =============================
+        case InstrType::LOAD_WORD:
+            regs.R[instr.rd] = memory.read16(instr.imm);
+            break;
+
+        case InstrType::STORE_WORD:
+            memory.write16(instr.imm, regs.R[instr.rs]);
+            break;
+
+        // =============================
+        // JUMP
+        // =============================
+        case InstrType::JUMP:
             regs.PC = instr.imm;
             break;
-        }
 
-        // =====================================================
-        // JZ / JNZ addr
-        // =====================================================
-        case InstrType::JUMP_COND: {
+        // =============================
+        // JZ / JNZ
+        // =============================
+        case InstrType::JUMP_COND:
+            if (opcode == 0x41 && regs.flags.ZF)  // JZ
+                regs.PC = instr.imm;
+            else if (opcode == 0x42 && !regs.flags.ZF)  // JNZ
+                regs.PC = instr.imm;
+            break;
 
-            if (opcode == 0x41) {       // JZ
-                if (regs.flags.ZF)
-                    regs.PC = instr.imm;
-            }
-            else if (opcode == 0x42) {  // JNZ
-                if (!regs.flags.ZF)
-                    regs.PC = instr.imm;
-            }
+        // =============================
+        // PUSH Rn
+        // =============================
+        case InstrType::PUSH_REG:
+        {
+            regs.SP -= 2;
+            memory.write16(regs.SP, regs.R[instr.rs]);
             break;
         }
 
-        // =====================================================
+        // =============================
+        // POP Rn
+        // =============================
+        case InstrType::POP_REG:
+        {
+            regs.R[instr.rd] = memory.read16(regs.SP);
+            regs.SP += 2;
+            break;
+        }
+
+        // =============================
+        // CALL address
+        // =============================
+        case InstrType::CALL:
+        {
+            regs.SP -= 2;
+            memory.write16(regs.SP, regs.PC);  // push return PC
+            regs.PC = instr.imm;               // jump to function
+            break;
+        }
+
+        // =============================
+        // RET
+        // =============================
+        case InstrType::RET:
+        {
+            uint16_t retAddr = memory.read16(regs.SP); // pop PC
+            regs.SP += 2;
+            regs.PC = retAddr;
+            break;
+        }
+
+
+        
+        // =============================
         // HALT
-        // =====================================================
-        case InstrType::HALT: {
+        // =============================
+        case InstrType::HALT:
             std::cout << "\nCPU HALTED.\n";
             regs.dump();
-            memory.dump(0x0000, 0x0030);
+            memory.dump(0, 0x0060);
             exit(0);
-        }
 
         default:
             break;

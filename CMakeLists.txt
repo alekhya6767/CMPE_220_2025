@@ -34,5 +34,6 @@ target_link_libraries(emulator cpu)
 # Assembler Executable
 # ========================
 add_executable(assembler
+    assembler/main.cpp
     assembler/assembler.cpp
 )

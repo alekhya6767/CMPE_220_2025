@@ -1,149 +1,121 @@
 #include "control.h"
 
-// =====================================================
-// SAFETY HELPER: Clamp register index to valid range
-// =====================================================
-static inline uint8_t clamp_reg(uint16_t value) {
-    // Prevent invalid register access (R4, R5, etc.)
-    // REG_COUNT is defined in common.h
-    if (value >= REG_COUNT)
-        return value % REG_COUNT;   // wrap to usable register
-    return value;
-}
-
-// =====================================================
+// ================================================
 // decode()
-// Takes an opcode + operands and produces a DecodedInstr.
-// =====================================================
-DecodedInstr ControlUnit::decode(uint8_t opcode, uint16_t op1, uint16_t op2) {
-
+// Maps opcode + operands into a structured format
+// ================================================
+DecodedInstr ControlUnit::decode(uint8_t opcode, uint16_t op1, uint16_t op2)
+{
     DecodedInstr d{};
     d.type = InstrType::NONE;
     d.alu_op = ALUOp::NONE;
 
-    // =====================================================
-    // MOVI Rn, imm   (Opcode: 0x10)
-    // =====================================================
+    // ============================
+    // MOV Rn, imm
+    // ============================
     if (opcode == 0x10) {
         d.type = InstrType::REG_IMM;
-        d.alu_op = ALUOp::MOV;
-
-        d.rd  = clamp_reg(op1);  // FIX: make sure register index is valid
+        d.rd = op1;
         d.imm = op2;
-
+        d.alu_op = ALUOp::MOV;
         return d;
     }
 
-    // =====================================================
-    // MOV Rn, Rm   (Opcode: 0x11)
-    // =====================================================
+    // ============================
+    // MOV Rn, Rm
+    // ============================
     if (opcode == 0x11) {
         d.type = InstrType::REG_REG;
+        d.rd = op1;
+        d.rs = op2;
         d.alu_op = ALUOp::MOV;
-
-        d.rd = clamp_reg(op1);
-        d.rs = clamp_reg(op2);
-
         return d;
     }
 
-    // =====================================================
-    // ADD Rn, Rm   (Opcode: 0x20)
-    // =====================================================
-    if (opcode == 0x20) {
-        d.type = InstrType::ALU_REG_REG;
-        d.alu_op = ALUOp::ADD;
+    // ============================
+    // ALU OPS
+    // ============================
+    if (opcode == 0x20) { d.type = InstrType::ALU_REG_REG; d.alu_op = ALUOp::ADD; d.rd = op1; d.rs = op2; return d; }
+    if (opcode == 0x21) { d.type = InstrType::ALU_REG_REG; d.alu_op = ALUOp::SUB; d.rd = op1; d.rs = op2; return d; }
+    if (opcode == 0x22) { d.type = InstrType::ALU_REG_REG; d.alu_op = ALUOp::AND_; d.rd = op1; d.rs = op2; return d; }
+    if (opcode == 0x23) { d.type = InstrType::ALU_REG_REG; d.alu_op = ALUOp::OR_; d.rd = op1; d.rs = op2; return d; }
+    if (opcode == 0x24) { d.type = InstrType::ALU_REG_REG; d.alu_op = ALUOp::XOR_; d.rd = op1; d.rs = op2; return d; }
+    if (opcode == 0x25) { d.type = InstrType::ALU_REG_REG; d.alu_op = ALUOp::CMP; d.rd = op1; d.rs = op2; return d; }
 
-        d.rd = clamp_reg(op1);
-        d.rs = clamp_reg(op2);
-
-        return d;
-    }
-
-    // =====================================================
-    // SUB Rn, Rm   (Opcode: 0x21)
-    // =====================================================
-    if (opcode == 0x21) {
-        d.type = InstrType::ALU_REG_REG;
-        d.alu_op = ALUOp::SUB;
-
-        d.rd = clamp_reg(op1);
-        d.rs = clamp_reg(op2);
-
-        return d;
-    }
-
-    // =====================================================
-    // AND / OR / XOR / CMP (0x22–0x25)
-    // =====================================================
-    if (opcode == 0x22 || opcode == 0x23 || opcode == 0x24 || opcode == 0x25) {
-        d.type = InstrType::ALU_REG_REG;
-
-        if (opcode == 0x22) d.alu_op = ALUOp::AND_;
-        if (opcode == 0x23) d.alu_op = ALUOp::OR_;
-        if (opcode == 0x24) d.alu_op = ALUOp::XOR_;
-        if (opcode == 0x25) d.alu_op = ALUOp::CMP;
-
-        d.rd = clamp_reg(op1);
-        d.rs = clamp_reg(op2);
-
-        return d;
-    }
-
-    // =====================================================
-    // LOAD Rn, [addr]  (Opcode: 0x30)
-    // =====================================================
+    // ============================
+    // LOAD / STORE
+    // ============================
     if (opcode == 0x30) {
         d.type = InstrType::LOAD_WORD;
-        d.rd   = clamp_reg(op1);
-        d.imm  = op2;
+        d.rd = op1;
+        d.imm = op2;
         return d;
     }
 
-    // =====================================================
-    // STORE Rn, [addr] (Opcode: 0x31)
-    // =====================================================
     if (opcode == 0x31) {
         d.type = InstrType::STORE_WORD;
-        d.rs   = clamp_reg(op1);
-        d.imm  = op2;
+        d.rs = op1;
+        d.imm = op2;
         return d;
     }
 
-    // =====================================================
-    // JMP addr (Opcode: 0x40)
-    // =====================================================
+    // ============================
+    // JMP
+    // ============================
     if (opcode == 0x40) {
         d.type = InstrType::JUMP;
-        d.imm  = op1;     // jump target
+        d.imm = op1;
         return d;
     }
 
-    // =====================================================
-    // JZ addr (Opcode: 0x41)
-    // =====================================================
-    if (opcode == 0x41) {
-        d.type = InstrType::JUMP_COND;
-        d.imm  = op1;
+    // ============================
+    // JZ / JNZ
+    // ============================
+    if (opcode == 0x41) { d.type = InstrType::JUMP_COND; d.imm = op1; return d; }
+    if (opcode == 0x42) { d.type = InstrType::JUMP_COND; d.imm = op1; return d; }
+
+    // ============================
+    // PUSH Rn
+    // ============================
+    if (opcode == 0x50) {
+        d.type = InstrType::PUSH_REG;
+        d.rs = op1;
         return d;
     }
 
-    // =====================================================
-    // JNZ addr (Opcode: 0x42)
-    // =====================================================
-    if (opcode == 0x42) {
-        d.type = InstrType::JUMP_COND;
-        d.imm  = op1;
+    // ============================
+    // POP Rn
+    // ============================
+    if (opcode == 0x51) {
+        d.type = InstrType::POP_REG;
+        d.rd = op1;
         return d;
     }
 
-    // =====================================================
-    // HALT (Opcode: 0xFF)
-    // =====================================================
+    // ============================
+    // CALL label
+    // ============================
+    if (opcode == 0x60) {
+        d.type = InstrType::CALL;
+        d.imm = op1;
+        return d;
+    }
+
+    // ============================
+    // RET
+    // ============================
+    if (opcode == 0x61) {
+        d.type = InstrType::RET;
+        return d;
+    }
+
+    // ============================
+    // HALT
+    // ============================
     if (opcode == 0xFF) {
         d.type = InstrType::HALT;
         return d;
     }
-    
+
     return d;
 }

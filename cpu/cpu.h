@@ -1,30 +1,24 @@
-#pragma once     // Prevent multiple includes
+#pragma once
 
-#include <cstdint>        // uint16_t, uint8_t
-#include "registers.h"    // RegisterFile class
-#include "memory.h"       // Memory class
-#include "control.h"      // ControlUnit + DecodedInstr
-#include "alu.h"          // ALU operations
+#include <vector>
+#include <cstdint>
+#include "registers.h"
+#include "memory.h"
+#include "alu.h"
+#include "control.h"
 
-// ============================================
-// CPU CLASS
-// Handles:
-// - Fetch
-// - Decode
-// - Execute
-// - Timer tick
-// - Running programs until HALT
-// ============================================
 class CPU {
 public:
-    RegisterFile regs;     // Holds registers + PC + flags
-    Memory memory;         // 64 KB memory + I/O
-    ControlUnit cu;        // Decodes opcodes into instruction structure
-    ALU alu;               // Performs arithmetic/logic ops
+    RegisterFile regs;
+    Memory memory;
+    ALU alu;
+    ControlUnit cu;
 
-    CPU();                 // Constructor
+    CPU();
 
-    void load_program(const std::vector<uint8_t>& program, uint16_t start);
-    void run();            // Runs program until HALT
-    void step();           // Executes ONE instruction
+    void load_program(const std::vector<uint8_t> &program,
+                      uint16_t start);
+
+    void run();
+    void step();
 };
